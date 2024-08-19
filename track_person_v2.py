@@ -13,6 +13,12 @@ import tensorflow as tf
 # Set compatibility for TensorFlow version 1.
 tf.compat.v1.disable_eager_execution()
 import argparse
+from tellopy._internal.protocol import Packet
+SET_ALT_LIMIT_CMD = 0x0058
+pkt = Packet(SET_ALT_LIMIT_CMD)
+pkt.add_byte(int(2))
+pkt.add_byte(0x00)
+pkt.fixup()
 
 import posenet
 
@@ -55,8 +61,10 @@ def controller_thread():
         while run_controller_thread:
             time.sleep(.05)
             # takeoff
-            if keyboard.is_pressed('space'):
+            if keyboard.is_pressed('p'):
                 drone.takeoff()
+                control_on = True
+                print('********** [INFO] Takeoff ************')
             # land
             elif keyboard.is_pressed('l'):
                 drone.land()
@@ -82,7 +90,8 @@ def controller_thread():
             elif keyboard.is_pressed('t'): #toggle controls
                 control_on = False
             elif keyboard.is_pressed('esc'):
-                drone.land()
+                drone.land()            
+                print('*************[INFO] Land and Break **********')
                 break
 
             #set commands based on PID output
@@ -134,21 +143,25 @@ def main():
     drone.connect()
     drone.wait_for_connection(60.0)
     drone.start_video()
+    drone.send_packet(pkt)
 
     drone.subscribe(drone.EVENT_FLIGHT_DATA, handler)
-    pid_cc = PID(0.35,0.2,0.2,setpoint=0,output_limits=(-100,100))
-    pid_ud = PID(0.3,0.3,0.3,setpoint=0,output_limits=(-80,80))
-    pid_fb = PID(0.35,0.2,0.3,setpoint=0,output_limits=(-50,50))
+    
+    # Parte responsável pelo controle PID
+    pid_cc = PID(Kp=0.35,Ki=0.2,Kd=0,setpoint=0,output_limits=(-100,100))
+    pid_ud = PID(0.4,0.4,0,setpoint=0,output_limits=(-80,80))
+    pid_fb = PID(0.35,0.1,0,setpoint=0,output_limits=(-50,50))
+  
 
     video = cv2.VideoWriter('test_out.mp4',-1,1,(320,240))
-    # drone.subscribe(drone.EVENT_VIDEO_FRAME,handler)
+    #drone.subscribe(drone.EVENT_VIDEO_FRAME,handler)
     print("Start Running")
     with tf.compat.v1.Session() as sess:
         model_cfg, model_outputs = posenet.load_model(args.model, sess)
         output_stride = model_cfg['output_stride']
 
         try:
-            # threading.Thread(target=recv_thread).start()
+            #threading.Thread(target=recv_thread).start()
             threading.Thread(target=controller_thread).start()
             container = av.open(drone.get_video_stream())
             frame_count = 0
@@ -246,16 +259,16 @@ def main():
                             pid_fb.reset()
 
                         #don't let the hips lie
-                        # if keypoint_scores[0,11] < .04 and keypoint_scores[0,12] < .04:
-                        #     drone_fb = -20
-                        #     drone_ud = -20
+                        #if keypoint_scores[0,11] < .04 and keypoint_scores[0,12] < .04:
+                         #   drone_fb = -20
+                         #   drone_ud = -20
 
-                        #overlay_image = cv2.putText(overlay_image, str(ctrl_out_fb), (30,110), cv2.FONT_HERSHEY_SIMPLEX ,   1, (55,255,45), 2)
-                        # overlay_image = cv2.putText(overlay_image, str(ctrl_out_ud), (30,30), cv2.FONT_HERSHEY_SIMPLEX ,   1, (55,255,45), 2)
-                        #overlay_image = cv2.putText(overlay_image, str(errory), (30,70), cv2.FONT_HERSHEY_SIMPLEX ,   1, (55,255,45), 2)
+                       # overlay_image = cv2.putText(overlay_image, str(ctrl_out_fb), (30,110), cv2.FONT_HERSHEY_SIMPLEX ,   1, (55,255,45), 2)
+                       # overlay_image = cv2.putText(overlay_image, str(ctrl_out_ud), (30,30), cv2.FONT_HERSHEY_SIMPLEX ,   1, (55,255,45), 2)
+                       # overlay_image = cv2.putText(overlay_image, str(errory), (30,70), cv2.FONT_HERSHEY_SIMPLEX ,   1, (55,255,45), 2)
                         cv2.imshow('posenet', overlay_image)
                         video.write(overlay_image)
-                        #cv2.imshow('Original', image)
+                       # cv2.imshow('Original', image)
                         #cv2.imshow('Canny', cv2.Canny(image, 100, 200))
                         cv2.waitKey(1)
         except KeyboardInterrupt as e:
@@ -265,6 +278,7 @@ def main():
             traceback.print_exception(exc_type, exc_value, exc_traceback)
             print(e)
 
+    print('*************[INFO] Destroy all windows**********')
     cv2.destroyAllWindows()
     video.release()
     drone.quit()
